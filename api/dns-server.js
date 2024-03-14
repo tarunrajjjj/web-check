@@ -3,19 +3,26 @@ const dnsPromises = dns.promises;
 const axios = require('axios');
 const middleware = require('./_common/middleware');
 
+const resolveDomain = async (domain) => dnsPromises.resolve4(domain);
+
+const reverseDnsLookup = async (address) => dnsPromises.reverse(address).catch(() => null);
+
+const checkDohSupport = async (address) => {
+  try {
+    await axios.get(`https://${address}/dns-query`);
+    return true;
+  } catch (error) {
+    return false;
+  }
+};
+
 const handler = async (url) => {
   try {
     const domain = url.replace(/^(?:https?:\/\/)?/i, "");
-    const addresses = await dnsPromises.resolve4(domain);
+    const addresses = await resolveDomain(domain);
     const results = await Promise.all(addresses.map(async (address) => {
-      const hostname = await dnsPromises.reverse(address).catch(() => null);
-      let dohDirectSupports = false;
-      try {
-        await axios.get(`https://${address}/dns-query`);
-        dohDirectSupports = true;
-      } catch (error) {
-        dohDirectSupports = false;
-      }
+      const hostname = await reverseDnsLookup(address);
+      const dohDirectSupports = await checkDohSupport(address);
       return {
         address,
         hostname,
@@ -23,21 +30,12 @@ const handler = async (url) => {
       };
     }));
 
-    // let dohMozillaSupport = false;
-    // try {
-    //   const mozillaList = await axios.get('https://firefox.settings.services.mozilla.com/v1/buckets/security-state/collections/onecrl/records');
-    //   dohMozillaSupport = results.some(({ hostname }) => mozillaList.data.data.some(({ id }) => id.includes(hostname)));
-    // } catch (error) {
-    //   console.error(error);
-    // }
-
     return {
       domain,
       dns: results,
-      // dohMozillaSupport,
     };
   } catch (error) {
-    throw new Error(`An error occurred while resolving DNS. ${error.message}`); // This will be caught and handled by the commonMiddleware
+    throw new Error(`An error occurred while resolving DNS. ${error.message}`);
   }
 };
 
